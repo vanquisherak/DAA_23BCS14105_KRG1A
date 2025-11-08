@@ -1,0 +1,221 @@
+"""
+Geometric Enigmas Prototype
+- Closest Pair (divide & conquer)
+- Convex Hull (Graham scan)
+- Line Segment Intersection (with intersection point)
+- Simple Matplotlib visualization
+
+Run: python geometric_enigmas.py
+"""
+
+import math
+import random
+from typing import List, Tuple, Optional
+import matplotlib.pyplot as plt
+
+Point = Tuple[float, float]
+Segment = Tuple[Point, Point]
+
+# -------------------------
+# Geometry helpers
+# -------------------------
+def dist(a: Point, b: Point) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+def orientation(a: Point, b: Point, c: Point) -> int:
+    # returns 0 if colinear, 1 if clockwise, 2 if counterclockwise
+    val = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+    if abs(val) < 1e-12:
+        return 0
+    return 1 if val > 0 else 2
+
+def on_segment(a: Point, b: Point, c: Point) -> bool:
+    # check if point b lies on segment ac
+    return (min(a[0], c[0]) <= b[0] <= max(a[0], c[0]) and
+            min(a[1], c[1]) <= b[1] <= max(a[1], c[1]))
+
+# -------------------------
+# Line intersection
+# -------------------------
+def segments_intersect(p1: Point, q1: Point, p2: Point, q2: Point) -> Tuple[bool, Optional[Point]]:
+    o1 = orientation(p1, q1, p2)
+    o2 = orientation(p1, q1, q2)
+    o3 = orientation(p2, q2, p1)
+    o4 = orientation(p2, q2, q1)
+
+    # General case
+    if o1 != o2 and o3 != o4:
+        # compute intersection point of the lines (not just segments)
+        return True, line_intersection_point(p1, q1, p2, q2)
+
+    # Special cases
+    if o1 == 0 and on_segment(p1, p2, q1):
+        return True, p2
+    if o2 == 0 and on_segment(p1, q2, q1):
+        return True, q2
+    if o3 == 0 and on_segment(p2, p1, q2):
+        return True, p1
+    if o4 == 0 and on_segment(p2, q1, q2):
+        return True, q1
+
+    return False, None
+
+def line_intersection_point(p1: Point, p2: Point, p3: Point, p4: Point) -> Optional[Point]:
+    # Solve line intersection using determinant approach
+    x1, y1 = p1; x2, y2 = p2; x3, y3 = p3; x4, y4 = p4
+    denom = (x1-x2)*(y3-y4) - (y1-y2)*(x3-x4)
+    if abs(denom) < 1e-12:
+        return None
+    px = ((x1*y2 - y1*x2)*(x3-x4) - (x1-x2)*(x3*y4 - y3*x4)) / denom
+    py = ((x1*y2 - y1*x2)*(y3-y4) - (y1-y2)*(x3*y4 - y3*x4)) / denom
+    return (px, py)
+
+# -------------------------
+# Convex Hull (Graham scan)
+# -------------------------
+def convex_hull(points: List[Point]) -> List[Point]:
+    pts = sorted(points)
+    if len(pts) <= 1:
+        return pts
+
+    # cross product
+    def cross(o: Point, a: Point, b: Point) -> float:
+        return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0])
+
+    lower = []
+    for p in pts:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+
+    upper = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+
+    # concatenation without duplicate endpoints
+    return lower[:-1] + upper[:-1]
+
+# -------------------------
+# Closest Pair - divide & conquer
+# -------------------------
+def closest_pair(points: List[Point]) -> Tuple[float, Tuple[Point, Point]]:
+    pts = sorted(points, key=lambda x: x[0])
+    def _closest(px: List[Point], py: List[Point]) -> Tuple[float, Tuple[Point, Point]]:
+        n = len(px)
+        if n <= 3:
+            best = float('inf')
+            pair = (None, None)
+            for i in range(n):
+                for j in range(i+1, n):
+                    d = dist(px[i], px[j])
+                    if d < best:
+                        best = d
+                        pair = (px[i], px[j])
+            return best, pair
+
+        mid = n // 2
+        midx = px[mid][0]
+        Qx = px[:mid]
+        Rx = px[mid:]
+        Qset = set(Qx)
+        Qy = [p for p in py if p in Qset]
+        Ry = [p for p in py if p not in Qset]
+
+        dl, pl = _closest(Qx, Qy)
+        dr, pr = _closest(Rx, Ry)
+        d = dl; pair = pl
+        if dr < d:
+            d = dr; pair = pr
+
+        # build strip
+        strip = [p for p in py if abs(p[0] - midx) < d]
+        # compare each point to next up to 7 points
+        for i in range(len(strip)):
+            j = i+1
+            while j < len(strip) and (strip[j][1] - strip[i][1]) < d:
+                dj = dist(strip[i], strip[j])
+                if dj < d:
+                    d = dj
+                    pair = (strip[i], strip[j])
+                j += 1
+        return d, pair
+
+    py = sorted(pts, key=lambda p: p[1])
+    return _closest(pts, py)
+
+# -------------------------
+# Visualization
+# -------------------------
+def visualize(points: List[Point], hull: List[Point], closest: Tuple[Point, Point],
+              segments: List[Segment], intersections: List[Point]):
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+
+    plt.figure(figsize=(8,8))
+    plt.scatter(xs, ys, s=25)  # points
+
+    # convex hull polygon
+    if len(hull) > 0:
+        hx = [p[0] for p in hull] + [hull[0][0]]
+        hy = [p[1] for p in hull] + [hull[0][1]]
+        plt.plot(hx, hy, linestyle='-', linewidth=1.5)
+
+    # closest pair
+    if closest[0] is not None and closest[1] is not None:
+        cx = [closest[0][0], closest[1][0]]
+        cy = [closest[0][1], closest[1][1]]
+        plt.plot(cx, cy, linestyle='--', linewidth=2)
+
+    # segments
+    for s in segments:
+        x = [s[0][0], s[1][0]]
+        y = [s[0][1], s[1][1]]
+        plt.plot(x, y, linewidth=1)
+
+    # intersections
+    for ip in intersections:
+        plt.scatter([ip[0]], [ip[1]], s=80, marker='x')
+
+    plt.gca().set_aspect('equal', 'box')
+    plt.title('Geometric Enigmas: points, hull, closest pair, intersections')
+    plt.show()
+
+# -------------------------
+# Demo / CLI
+# -------------------------
+def demo():
+    # sample points
+    pts = [(0,0), (1,1), (2,2), (3,1), (0,3), (2.5, 0.2), (1.8, 1.5), (4,3)]
+    # or generate random
+    # pts = [(random.uniform(0,5), random.uniform(0,5)) for _ in range(25)]
+
+    # Convex hull
+    hull = convex_hull(pts)
+
+    # Closest pair
+    d, pair = closest_pair(pts)
+
+    # Example segments and intersections
+    segs = [((0,0),(3,3)), ((0,3),(3,0)), ((1,0),(1,4))]
+    intersections = []
+    for i in range(len(segs)):
+        for j in range(i+1, len(segs)):
+            ok, ip = segments_intersect(segs[i][0], segs[i][1], segs[j][0], segs[j][1])
+            if ok and ip is not None:
+                # check if intersection lies within both segments bounding boxes (already done)
+                intersections.append(ip)
+
+    # print summary
+    print("Points:", pts)
+    print("Convex Hull (counterclockwise):", hull)
+    print("Closest Pair:", pair, "Distance:", d)
+    print("Segments:", segs)
+    print("Intersections:", intersections)
+
+    # visualize
+    visualize(pts, hull, pair, segs, intersections)
+
+if __name__ == "__main__":
+    demo()
